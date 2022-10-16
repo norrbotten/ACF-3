@@ -255,7 +255,7 @@ local DataFrame = {
 			if Column.FuncG == nil then
 				return Column.FuncF(self, CellIndex)
 			else
-				return Column.FuncG(self, Column.FuncF(self, CellIndex))
+				return Column.FuncF(self, Column.FuncG(self, CellIndex))
 			end
 		elseif Column.Type == "DATA" then
 			local Cell = Column[CellIndex]
@@ -284,3 +284,262 @@ end
 DataFrame.__index = DataFrame
 
 Plot.DataFrame = DataFrame
+
+-- Data view is an immutable (not really, since this is lua after all) view into a column in a data
+-- frame. It starts and ends at specified indices and provides caching. Can be used for plotting
+-- values or for example getting data out of a computed column in a certain range easily.
+local DataView = {
+	IsValid = function(self)
+		if self.Df == nil then return end
+		if self.Column == nil then return false end
+		if self.End < self.Start then return false end
+		return true
+	end,
+
+	-- Updates the views cache with values
+	Update = function(self)
+		if not self:IsValid() then return end
+
+		self.DataCache = {}
+		self.VarCache = {}
+
+		local Min = math.huge
+		local Max = -math.huge
+
+		for I = self.Start, self.End do
+			local Val = self.Df:EvaluateCellAt(self.ColumnName, I)
+			self.DataCache[I - self.Start + 1] = Val
+
+			if Val < Min then Min = Val end
+			if Val > Max then Max = Val end
+		end
+
+		self.VarCache.Min = Min
+		self.VarCache.Max = Max
+	end,
+
+	GetLength = function(self)
+		return self.End - self.Start + 1
+	end,
+
+	GetMax = function(self)
+		if self.VarCache == nil then self:Update() end
+		return self.VarCache.Max
+	end,
+
+	GetMin = function(self)
+		if self.VarCache == nil then self:Update() end
+		return self.VarCache.Min
+	end,
+
+	-- Gets a value from the view, indexed from the start of the view
+	GetValue = function(self, I)
+		if I < 1 or I > (self.End - self.Start) + 1 then return end
+
+		if self.DataCache == nil then self:Update() end
+
+		local Val = self.DataCache[I + self.Start - 1]
+		return Val
+	end,
+
+	-- Returns the views cache
+	GetValues = function(self)
+		if self.DataCache == nil then self:Update() end
+		return self.DataCache
+	end
+}
+
+DataView.Create = function(Df, ColumnName, StartCellIndex, EndCellIndex)
+	return setmetatable({
+		Df         = Df,
+		Column     = Df:GetColumnTable(ColumnName),
+		ColumnName = ColumnName,
+
+		Start = StartCellIndex or 1,
+		End   = EndCellIndex or Df:GetColumnLength(ColumnName) or 0,
+
+		DataCache = nil,
+		VarCache  = nil,
+		
+	}, DataView)
+end
+
+DataView.__index = DataView
+
+Plot.DataView = DataView
+
+-- Table of valid plot types
+-- false = unimplemented, but there for future reference
+local ValidPlotTypes = {}
+ValidPlotTypes["2d-line"]    = true
+ValidPlotTypes["2d-scatter"] = false
+
+-- Required keys in Args table to PlotController:AddPlot
+-- Optionals are commented out, but there for reference
+local RequiredPlotArgs = {
+	-- Shared args:
+	-- Color = "Color", -- Default: Color(255, 0, 0), color to draw the line or whatever
+	["2d-line"] = {
+		Series = "table", -- DataView to use
+		--SeriesMin = "number", -- Default: min(Series), set minimum value for series axis
+		--SeriesMax = "number", -- Default: max(Series), set maximum value for series axis
+		--CrossMin = "number"   -- Default: start(Series), set minimum value for cross axis
+		--CrossMax = "number"   -- Default: end(Series), set maximum value for cross axis
+		--Dots = "number",      -- Default: 0, size of data point dots
+		--Line = "number",      -- Default: 2, thickness of line
+	},
+	["2d-scatter"] = {
+		SeriesX = "table",       -- DataView for X data
+		SeriesY = "table",       -- DataView for Y data
+		--SeriesXMin = "number", -- Default: min(SeriesX)
+		--SeriesXMax = "number", -- Default: max(SeriesX)
+		--SeriesYMin = "number", -- Default: min(SeriesY)
+		--SeriesYMin = "number", -- Default: max(SeriesY)
+		--Dots = "number",       -- Default: 4, size of data point dots
+	}
+}
+
+local function Draw2DLinePlot(Width, Height, Series, Args)
+	surface.SetDrawColor(Args.Color)
+
+	local LastX = 1
+	local LastY = Series:GetValue(1)
+
+	for X = 2, Series:GetLength() do
+		local Y = Series:GetValue(X)
+
+		local X1 = math.Remap(LastX, Args.CrossMin, Args.CrossMax, 0, Width)
+		local Y1 = math.Remap(LastY, Args.SeriesMin, Args.SeriesMax, Height, 0)
+		local X2 = math.Remap(X, Args.CrossMin, Args.CrossMax, 0, Width)
+		local Y2 = math.Remap(Y, Args.SeriesMin, Args.SeriesMax, Height, 0)
+
+		surface.DrawLine(X1, Y1, X2, Y2)
+
+		LastX = X
+		LastY = Y
+	end
+end
+
+local PlotController = {
+	AddPlot = function(self, Type, Args)
+		if not ValidPlotTypes[Type] then return end
+
+		local RequiredArgs = RequiredPlotArgs[Type]
+		if RequiredArgs then
+			for Arg, ArgType in pairs(RequiredArgs) do
+				if Args[Arg] == nil then return end
+				if type(Args[Arg]) ~= ArgType then return end
+			end
+		end
+
+		-- Set up default vars, and series table
+		-- This should really be done in a better way later
+
+		local Series = {}
+
+		if Args.Color == nil or type(Args.Color) ~= "table" then
+			Args.Color = Color(255, 0, 0)
+		end
+
+		if Type == "2d-line" then
+			Series = { Args.Series }
+
+			if Args.SeriesMin == nil or type(Args.SeriesMin) ~= "number" then
+				Args.SeriesMin = Args.Series:GetMin()
+			end
+
+			if Args.SeriesMax == nil or type(Args.SeriesMax) ~= "number" then
+				Args.SeriesMax = Args.Series:GetMax()
+			end
+
+			if Args.CrossMin == nil or type(Args.CrossMin) ~= "number" then
+				Args.CrossMin = 1
+			end
+
+			if Args.CrossMax == nil or type(Args.CrossMax) ~= "number" then
+				Args.CrossMax = Args.Series:GetLength()
+			end
+
+			if Args.Dots == nil or type(Args.Dots) ~= "number" then
+				Args.Dots = 0
+			end
+
+			if Args.Line == nil or type(Args.Line) ~= "number" then
+				Args.Line = 2
+			end
+		elseif Type == "2d-scatter" then
+			Series = { Args.SeriesX, Args.SeriesY }
+
+			if Args.SeriesXMin == nil or type(Args.SeriesXMin) ~= "number" then
+				Args.SeriesXMin = Args.SeriesX:GetMin()
+			end
+
+			if Args.SeriesXMax == nil or type(Args.SeriesXMax) ~= "number" then
+				Args.SeriesXMax = Args.SeriesX:GetMax()
+			end
+
+			if Args.SeriesYMin == nil or type(Args.SeriesYMin) ~= "number" then
+				Args.SeriesYMin = Args.SeriesY:GetMin()
+			end
+
+			if Args.SeriesYMax == nil or type(Args.SeriesYMax) ~= "number" then
+				Args.SeriesYMax = Args.SeriesY:GetMax()
+			end
+		end
+
+		table.insert(self.Plots, {
+			PlotType = Type,
+			Series = Series,
+			Args = Args,
+		})
+
+		return #self.Plots
+	end,
+
+	GetXMinMax = function(self, Plot)
+		local P = self.Plots[Plot]
+		if not P then return end
+
+		if P.PlotType == "2d-line" then
+			return P.Args.SeriesMin, P.Args.SeriesMax
+		
+		elseif P.PlotType == "2d-scatter" then
+			return P.Args.SeriesXMin, P.Args.SeriesXMax
+		end
+	end,
+
+	GetYMinMax = function(self, Plot)
+		local P = self.Plots[Plot]
+		if not P then return end
+
+		if P.PlotType == "2d-line" then
+			return P.Args.CrossMin, P.Args.CrossMax
+		
+		elseif P.PlotType == "2d-scatter" then
+			return P.Args.SeriesYMin, P.Args.SeriesYMax
+		end
+	end,
+
+	Draw = function(self, Width, Height)
+		for _, Plot in pairs(self.Plots) do
+			if Plot.PlotType == "2d-line" then
+				Draw2DLinePlot(Width, Height, Plot.Series[1], Plot.Args)
+
+			elseif Plot.PlotType == "2d-scatter" then
+				
+			end
+		end
+	end,
+}
+
+PlotController.Create = function()
+	return setmetatable({
+		Plots = {},
+		XLabel = "",
+		YLabel = "",
+	}, PlotController)
+end
+
+PlotController.__index = PlotController
+
+Plot.PlotController = PlotController

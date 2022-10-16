@@ -473,6 +473,64 @@ function PANEL:AddModelPreview(Model, Rotate)
 	return Panel
 end
 
+function PANEL:AddPlot()
+	local Settings = {
+		Height = 160,
+		Background = Color(245, 245, 245),
+	}
+
+	local Panel = self:AddPanel("DPanel")
+
+	function Panel:Paint(Width, Height)
+		surface.SetDrawColor(self.Settings.Background)
+		self:DrawFilledRect()
+		
+		local Mat = Matrix()
+		Mat:Translate(Vector(5, 5))
+
+		cam.PushModelMatrix(Mat)
+			self.PlotController:Draw(Width - 10, Height - 10)
+		cam.PopModelMatrix()
+	end
+
+	-- Extra panel to act as bottom margin, since apparently I can't use DockMargin
+	local BottomMargin = self:AddPanel("DPanel")
+	BottomMargin:SetHeight(5)
+	BottomMargin:SetBackgroundColor(Color(0, 0, 0, 0))
+
+	Panel.Settings = Settings
+	Panel.PlotController = ACF.Plot.PlotController.Create()
+
+	function Panel:Update()
+		self:SetHeight(self.Settings.Height)
+		self:SetBackgroundColor(self.Settings.Background)
+	end
+
+	function Panel:SetPlotControler(PlotController)
+		self.PlotController = PlotController
+	end
+
+	function Panel:GetPlotController()
+		return self.PlotController
+	end
+
+	function Panel:UpdateSettings(PlotSettings)
+		if isnumber(PlotSettings.Height) and PlotSettings.Height >= 0 then
+			self.Settings.height = PlotSettings.Height
+		end
+
+		if PlotSettings.Background then
+			self.Settings.Background = Color(PlotSettings.Background)
+		end
+
+		self:Update()
+	end
+
+	Panel:Update()
+
+	return Panel
+end
+
 function PANEL:PerformLayout()
 	self:SizeToChildren(true, true)
 end

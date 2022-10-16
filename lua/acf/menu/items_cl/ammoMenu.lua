@@ -210,6 +210,30 @@ function ACF.UpdateAmmoMenu(Menu, Settings)
 		AddPreview(Base, Settings, ToolData)
 		AddControls(Base, Settings, ToolData)
 		AddInformation(Base, Settings, ToolData)
+
+		if ToolData.PrimaryClass == "acf_gun" then -- Don't display this for missiles and such
+			local Plot = Base:AddPlot()
+			local PlotController = Plot:GetPlotController()
+			
+			local Df = ACF.Plot.DataFrame.Create()
+			
+			Df:AddComputedColumn("f(x)",
+				function(Df, I)
+					return 2.5 * math.pi * (I - 1) * (math.pi / 180)
+				end,
+				function(Df, X)
+					return math.sin(X) * X
+				end
+			)
+
+			local Dv = ACF.Plot.DataView.Create(Df, "f(x)", 1, 180)
+
+			PlotController:AddPlot("2d-line", {
+				Series = Dv,
+				Line = 2,
+				Color = Color(0, 0, 255),
+			})
+		end
 	end
 
 	Menu:EndTemporal(Base)
