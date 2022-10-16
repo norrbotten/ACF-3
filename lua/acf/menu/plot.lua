@@ -371,8 +371,7 @@ Plot.DataView = DataView
 -- Table of valid plot types
 -- false = unimplemented, but there for future reference
 local ValidPlotTypes = {}
-ValidPlotTypes["2d-line"]    = true
-ValidPlotTypes["2d-scatter"] = false
+ValidPlotTypes["2d-line"] = true
 
 -- Required keys in Args table to PlotController:AddPlot
 -- Optionals are commented out, but there for reference
@@ -380,43 +379,44 @@ local RequiredPlotArgs = {
 	-- Shared args:
 	-- Color = "Color", -- Default: Color(255, 0, 0), color to draw the line or whatever
 	["2d-line"] = {
-		Series = "table", -- DataView to use
-		--SeriesMin = "number", -- Default: min(Series), set minimum value for series axis
-		--SeriesMax = "number", -- Default: max(Series), set maximum value for series axis
-		--CrossMin = "number"   -- Default: start(Series), set minimum value for cross axis
-		--CrossMax = "number"   -- Default: end(Series), set maximum value for cross axis
-		--Dots = "number",      -- Default: 0, size of data point dots
-		--Line = "number",      -- Default: 2, thickness of line
-	},
-	["2d-scatter"] = {
 		SeriesX = "table",       -- DataView for X data
 		SeriesY = "table",       -- DataView for Y data
 		--SeriesXMin = "number", -- Default: min(SeriesX)
 		--SeriesXMax = "number", -- Default: max(SeriesX)
 		--SeriesYMin = "number", -- Default: min(SeriesY)
 		--SeriesYMin = "number", -- Default: max(SeriesY)
-		--Dots = "number",       -- Default: 4, size of data point dots
+		--Line = "number",       -- Default: 1, thiccness of line
+		--Dots = "number",       -- Default: 0, size of data point dots
 	}
 }
 
-local function Draw2DLinePlot(Width, Height, Series, Args)
+local function Draw2DLinePlot(Width, Height, SeriesX, SeriesY, Args)
 	surface.SetDrawColor(Args.Color)
 
-	local LastX = 1
-	local LastY = Series:GetValue(1)
+	local I = 1
+	local Len = math.min(SeriesX:GetLength(), SeriesY:GetLength())
 
-	for X = 2, Series:GetLength() do
-		local Y = Series:GetValue(X)
+	local LastX = math.Remap(SeriesX:GetValue(I), Args.SeriesXMin, Args.SeriesXMax, 0, Width)
+	local LastY = math.Remap(SeriesY:GetValue(I), Args.SeriesYMin, Args.SeriesYMax, Height, 0)
 
-		local X1 = math.Remap(LastX, Args.CrossMin, Args.CrossMax, 0, Width)
-		local Y1 = math.Remap(LastY, Args.SeriesMin, Args.SeriesMax, Height, 0)
-		local X2 = math.Remap(X, Args.CrossMin, Args.CrossMax, 0, Width)
-		local Y2 = math.Remap(Y, Args.SeriesMin, Args.SeriesMax, Height, 0)
+	I = I + 1
 
-		surface.DrawLine(X1, Y1, X2, Y2)
+	while I <= Len do
+		local X = math.Remap(SeriesX:GetValue(I), Args.SeriesXMin, Args.SeriesXMax, 0, Width)
+		local Y = math.Remap(SeriesY:GetValue(I), Args.SeriesYMin, Args.SeriesYMax, Height, 0)
+
+		if isnumber(Args.Line) and Args.Line > 0 then
+			surface.DrawLine(LastX, LastY, X, Y)
+		end
+
+		if isnumber(Args.Dots) and Args.Dots > 0 then
+			surface.DrawCircle(X, Y, Args.Dots, Args.Color.r, Args.Color.g, Args.Color.b)
+		end
 
 		LastX = X
 		LastY = Y
+
+		I = I + 1
 	end
 end
 
@@ -427,6 +427,7 @@ local PlotController = {
 		local RequiredArgs = RequiredPlotArgs[Type]
 		if RequiredArgs then
 			for Arg, ArgType in pairs(RequiredArgs) do
+				print(Arg, ArgType, Args[Arg], type(Args[Arg]))
 				if Args[Arg] == nil then return end
 				if type(Args[Arg]) ~= ArgType then return end
 			end
@@ -442,32 +443,6 @@ local PlotController = {
 		end
 
 		if Type == "2d-line" then
-			Series = { Args.Series }
-
-			if Args.SeriesMin == nil or type(Args.SeriesMin) ~= "number" then
-				Args.SeriesMin = Args.Series:GetMin()
-			end
-
-			if Args.SeriesMax == nil or type(Args.SeriesMax) ~= "number" then
-				Args.SeriesMax = Args.Series:GetMax()
-			end
-
-			if Args.CrossMin == nil or type(Args.CrossMin) ~= "number" then
-				Args.CrossMin = 1
-			end
-
-			if Args.CrossMax == nil or type(Args.CrossMax) ~= "number" then
-				Args.CrossMax = Args.Series:GetLength()
-			end
-
-			if Args.Dots == nil or type(Args.Dots) ~= "number" then
-				Args.Dots = 0
-			end
-
-			if Args.Line == nil or type(Args.Line) ~= "number" then
-				Args.Line = 2
-			end
-		elseif Type == "2d-scatter" then
 			Series = { Args.SeriesX, Args.SeriesY }
 
 			if Args.SeriesXMin == nil or type(Args.SeriesXMin) ~= "number" then
@@ -496,38 +471,73 @@ local PlotController = {
 		return #self.Plots
 	end,
 
-	GetXMinMax = function(self, Plot)
+	GetPlotXMinMax = function(self, Plot)
 		local P = self.Plots[Plot]
 		if not P then return end
 
 		if P.PlotType == "2d-line" then
-			return P.Args.SeriesMin, P.Args.SeriesMax
-		
-		elseif P.PlotType == "2d-scatter" then
 			return P.Args.SeriesXMin, P.Args.SeriesXMax
 		end
 	end,
 
-	GetYMinMax = function(self, Plot)
+	GetPlotYMinMax = function(self, Plot)
 		local P = self.Plots[Plot]
 		if not P then return end
 
 		if P.PlotType == "2d-line" then
-			return P.Args.CrossMin, P.Args.CrossMax
-		
-		elseif P.PlotType == "2d-scatter" then
 			return P.Args.SeriesYMin, P.Args.SeriesYMax
 		end
+	end,
+
+	GetUnifiedXMinMax = function(self)
+		local Min = math.huge
+		local Max = -math.huge
+
+		for I = 1, #self.Plots do
+			local PMin, PMax = self:GetPlotXMinMax(I)
+			if PMin < Min then Min = PMin end
+			if PMax > Max then Max = PMax end
+		end
+
+		return Min, Max
+	end,
+
+	GetUnifiedYMinMax = function(self)
+		local Min = math.huge
+		local Max = -math.huge
+
+		for I = 1, #self.Plots do
+			local PMin, PMax = self:GetPlotYMinMax(I)
+			if PMin < Min then Min = PMin end
+			if PMax > Max then Max = PMax end
+		end
+
+		return Min, Max
+	end,
+
+	SetXLabel = function(Label)
+		if not isstring(Label) then return end
+		self.XLabel = Label
+	end,
+
+	SetYLabel = function(Label)
+		if not isstring(Label) then return end
+		self.YLabel = Label
 	end,
 
 	Draw = function(self, Width, Height)
 		for _, Plot in pairs(self.Plots) do
 			if Plot.PlotType == "2d-line" then
-				Draw2DLinePlot(Width, Height, Plot.Series[1], Plot.Args)
-
-			elseif Plot.PlotType == "2d-scatter" then
-				
+				Draw2DLinePlot(Width, Height, Plot.Series[1], Plot.Series[2], Plot.Args)
 			end
+		end
+
+		if isstring(self.XLabel) and #self.XLabel > 0 then
+
+		end
+
+		if isstring(self.YLabel) and #self.YLabel > 0 then
+
 		end
 	end,
 }
