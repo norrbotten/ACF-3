@@ -230,7 +230,7 @@ function ACF.UpdateAmmoMenu(Menu, Settings)
 					return 6 * X * (math.pi / 180)
 				end,
 				function(Df, X)
-					return math.sin(X) * X
+					return math.sin(X * X) * X
 				end
 			)
 
@@ -269,8 +269,7 @@ function ACF.UpdateAmmoMenu(Menu, Settings)
 				Color = Color(255, 0, 0),
 			})
 
-			PlotController:AddRange("X", SharedRangeX, 0.0, 0, 15, "%i")
-			//PlotController:AddRange("Y", SharedRangeY, 0.0, 0, 3, true)
+			PlotController:AddRange("X", SharedRangeX, 0.0, 0, 20, "%i")
 
 			PlotController:SetXLabel("x")
 			PlotController:SetDrawXAxis(false)

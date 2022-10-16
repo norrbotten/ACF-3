@@ -497,7 +497,7 @@ local function DrawAxisRange(Width, Height, Axis, Range, CrossOffset, Base, Step
 			if ShowValues then
 				local Fmt = isstring(ShowValues) and ShowValues or "%i"
 				local Offset = CrossOffset < 0.5 and 18 or 0
-				draw.DrawText(Fmt:format(Value), "ACF_PlotLabel", X1, Y1 - Offset, Color(0, 0, 0))
+				draw.DrawText(Fmt:format(Value), "ACF_PlotLabel", X1, Y1 - Offset, Color(0, 0, 0), TEXT_ALIGN_CENTER)
 			end
 		end
 	elseif Axis == "Y" then
@@ -584,39 +584,85 @@ local PlotController = {
 	end,
 
 	Draw = function(self, Width, Height)
-		-- Inset the actual plots 10 pixels
-		local Mat = Matrix()
-		Mat:Translate(Vector(10, 10))
+		local WidthP2 = math.min(1024, math.pow(2, math.ceil(math.log(Width, 2))))
+		local HeightP2 = math.min(1024, math.pow(2, math.ceil(math.log(Height, 2))))
 
-		cam.PushModelMatrix(Mat)
-			-- Draw ranges
-			for _, Range in pairs(self.DrawnRanges) do
-				DrawAxisRange(Width - 20, Height - 20, Range.Axis, Range.Range, Range.CrossOffset,
-							  Range.Base, Range.Step, Range.ShowValues)
-			end
+		-- If no RT present, or the size has changed
+		if not self.RT or self.RT.Width ~= WidthP2 or self.RT.Height ~= HeightP2 then
+			local RTName = "ACF_Plot_" .. math.random(0, 4294967295)
+			local Texture = GetRenderTarget(RTName, WidthP2, HeightP2)
+			local Material = CreateMaterial(RTName, "UnlitGeneric", {
+				["$basetexture"] = Texture:GetName(),
+				["$translucent"] = 1,
+			})
 
-			-- Draw all plots
-			for _, Plot in pairs(self.Plots) do
-				if Plot.PlotType == "2d-line" then
-					Draw2DLinePlot(Width - 20, Height - 20, Plot.Series[1], Plot.Series[2], Plot.Args)
+			self.RT = {
+				Name = RTName,
+				Width = WidthP2,
+				Height = HeightP2,
+				NeedRedraw = true,
+				Texture = Texture,
+				Material = Material,
+			}
+		end
+
+		if self.RT.NeedRedraw then
+			render.PushRenderTarget(self.RT.Texture)
+			cam.Start2D()
+
+			local OldDisableClipping = DisableClipping(true)
+
+			render.ClearRenderTarget(self.RT.Texture, Color(255, 255, 255, 0))
+
+			-- Inset the actual plots 10 pixels
+			local Mat = Matrix()
+			Mat:Translate(Vector(10, 10))
+
+			cam.PushModelMatrix(Mat)
+				-- Draw ranges
+				for _, Range in pairs(self.DrawnRanges) do
+					DrawAxisRange(Width - 20, Height - 20, Range.Axis, Range.Range, Range.CrossOffset,
+								Range.Base, Range.Step, Range.ShowValues)
 				end
+
+				-- Draw all plots
+				for _, Plot in pairs(self.Plots) do
+					if Plot.PlotType == "2d-line" then
+						Draw2DLinePlot(Width - 20, Height - 20, Plot.Series[1], Plot.Series[2], Plot.Args)
+					end
+				end
+			cam.PopModelMatrix()
+
+			-- Draw X/Y axes
+			surface.SetDrawColor(Color(0, 0, 0))
+			if self.DrawXAxis then surface.DrawLine(1, 1, 1, Height - 3) end
+			if self.DrawYAxis then surface.DrawLine(4, Height - 1, Width - 1, Height - 1) end
+			
+			-- Draw X label
+			if isstring(self.XLabel) and #self.XLabel > 0 then
+				draw.DrawText(self.XLabel, "ACF_PlotLabel", Width - 3, Height - 15, Color(0, 0, 0), TEXT_ALIGN_RIGHT)
 			end
-		cam.PopModelMatrix()
 
-		-- Draw X/Y axes
-		surface.SetDrawColor(Color(0, 0, 0))
-		if self.DrawXAxis then surface.DrawLine(1, 1, 1, Height - 3) end
-		if self.DrawYAxis then surface.DrawLine(4, Height - 1, Width - 1, Height - 1) end
-		
-		-- Draw X label
-		if isstring(self.XLabel) and #self.XLabel > 0 then
-			draw.DrawText(self.XLabel, "ACF_PlotLabel", Width - 3, Height - 15, Color(0, 0, 0), TEXT_ALIGN_RIGHT)
+			-- Draw Y label
+			if isstring(self.YLabel) and #self.YLabel > 0 then
+				draw.DrawText(self.YLabel, "ACF_PlotLabel", 4, 0, Color(0, 0, 0), TEXT_ALIGN_LEFT)
+			end
+
+			DisableClipping(OldDisableClipping)
+
+			cam.End2D()
+			render.PopRenderTarget()
+
+			self.RT.NeedRedraw = false
 		end
 
-		-- Draw Y label
-		if isstring(self.YLabel) and #self.YLabel > 0 then
-			draw.DrawText(self.YLabel, "ACF_PlotLabel", 4, 0, Color(0, 0, 0), TEXT_ALIGN_LEFT)
-		end
+		render.PushFilterMag(TEXFILTER.POINT)
+
+		surface.SetDrawColor(Color(255, 255, 255))
+		surface.SetMaterial(self.RT.Material)
+		surface.DrawTexturedRectUV(0, 0, Width, Height, 0, 0, Width / WidthP2, Height / HeightP2)
+
+		render.PopFilterMag()
 	end,
 }
 
