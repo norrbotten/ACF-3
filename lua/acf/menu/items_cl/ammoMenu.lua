@@ -241,10 +241,10 @@ function ACF.UpdateAmmoMenu(Menu, Settings)
 				end
 			)
 
-			local DvX = ACF.Plot.DataView.Create(Df, "x", 1, 180)
+			local DvX = ACF.Plot.DataView.Create(Df, "x", 1, 190)
 			
-			local DvY  = ACF.Plot.DataView.Create(Df, "f(x)", 1, 180)
-			local DvY2 = ACF.Plot.DataView.Create(Df, "f2(x)", 1, 180)
+			local DvY  = ACF.Plot.DataView.Create(Df, "f(x)", 1, 190)
+			local DvY2 = ACF.Plot.DataView.Create(Df, "f2(x)", 1, 190)
 
 			local SharedRangeX = ACF.Plot.AxisRange.Create()
 			local SharedRangeY = ACF.Plot.AxisRange.Create()
@@ -269,11 +269,14 @@ function ACF.UpdateAmmoMenu(Menu, Settings)
 				Color = Color(255, 0, 0),
 			})
 
+			PlotController:AddRange("X", SharedRangeX, 0.0, 0, 15, "%i")
+			//PlotController:AddRange("Y", SharedRangeY, 0.0, 0, 3, true)
+
 			PlotController:SetXLabel("x")
-			PlotController:SetDrawXAxis(true)
+			PlotController:SetDrawXAxis(false)
 
 			PlotController:SetYLabel("y")
-			PlotController:SetDrawYAxis(true)
+			PlotController:SetDrawYAxis(false)
 		end
 	end
 

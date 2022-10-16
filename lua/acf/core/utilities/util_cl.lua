@@ -18,6 +18,12 @@ do -- Custom fonts
 		size = 14,
 		weight = 550,
 	})
+
+	surface.CreateFont("ACF_PlotLabel", {
+		font = "Roboto",
+		size = 12,
+		weight = 300,
+	})
 end
 
 do -- Networked notifications

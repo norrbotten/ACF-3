@@ -300,6 +300,10 @@ local AxisRange = {
 	GetMax = function(self)
 		return self.Max
 	end,
+
+	Contains = function(self, Value)
+		return Value >= self.Min and Value <= self.Max
+	end,
 }
 
 AxisRange.Create = function(Min, Max)
@@ -458,6 +462,49 @@ local function Draw2DLinePlot(Width, Height, SeriesX, SeriesY, Args)
 	end
 end
 
+local function DrawAxisRange(Width, Height, Axis, Range, CrossOffset, Base, Step, ShowValues)
+	local StartValue = math.floor((Range:GetMin() - Base) / Step) * Step + Base
+	local EndValue = math.ceil((Range:GetMax() - Base) / Step) * Step + Base
+	
+	surface.SetDrawColor(Color(90, 90, 90))
+
+	local CrossValue = Height * CrossOffset
+
+	if Axis == "X" then
+		surface.DrawLine(
+			math.Round(math.Remap(Range:GetMin(), Range:GetMin(), Range:GetMax(), 0, Width)),
+			math.Round(math.Remap(CrossValue, 0, Height, Height, 0)),
+			math.Round(math.Remap(Range:GetMax(), Range:GetMin(), Range:GetMax(), 0, Width)),
+			math.Round(math.Remap(CrossValue, 0, Height, Height, 0))
+		)
+
+		for Value = StartValue, EndValue, Step do
+			if not Range:Contains(Value) then continue end
+
+			local X1 = Value
+			local Y1 = CrossValue - 3
+
+			local X2 = Value
+			local Y2 = CrossValue + 3
+
+			X1 = math.Round(math.Remap(X1, Range:GetMin(), Range:GetMax(), 0, Width))
+			X2 = math.Round(math.Remap(X2, Range:GetMin(), Range:GetMax(), 0, Width))
+			Y1 = math.Round(math.Remap(Y1, 0, Height, Height, 0))
+			Y2 = math.Round(math.Remap(Y2, 0, Height, Height, 0))
+
+			surface.DrawLine(X1, Y1, X2, Y2)
+
+			if ShowValues then
+				local Fmt = isstring(ShowValues) and ShowValues or "%i"
+				local Offset = CrossOffset < 0.5 and 18 or 0
+				draw.DrawText(Fmt:format(Value), "ACF_PlotLabel", X1, Y1 - Offset, Color(0, 0, 0))
+			end
+		end
+	elseif Axis == "Y" then
+		-- TODO...
+	end
+end
+
 local PlotController = {
 	AddPlot = function(self, Type, Args)
 		if not ValidPlotTypes[Type] then return end
@@ -495,22 +542,27 @@ local PlotController = {
 		return #self.Plots
 	end,
 
-	GetPlotXMinMax = function(self, Plot)
-		local P = self.Plots[Plot]
-		if not P then return end
+	AddRange = function(self, Axis, Range, CrossOffset, Base, Step, ShowValues)
+		if Axis ~= "X" and Axis ~= "Y" then return end
+		if not Range or type(Range) ~= "table" then return end
 
-		if P.PlotType == "2d-line" then
-			return P.Args.SeriesXMin, P.Args.SeriesXMax
+		if isnumber(CrossOffset) then
+			CrossOffset = math.Clamp(CrossOffset, 0, 1)
+		else
+			CrossOffset = 0
 		end
-	end,
 
-	GetPlotYMinMax = function(self, Plot)
-		local P = self.Plots[Plot]
-		if not P then return end
+		table.insert(self.DrawnRanges, {
+			Axis  = Axis,
+			Range = Range,
+			
+			CrossOffset = CrossOffset,
+			
+			Base = Base,
+			Step = Step,
 
-		if P.PlotType == "2d-line" then
-			return P.Args.SeriesYMin, P.Args.SeriesYMax
-		end
+			ShowValues = ShowValues,
+		})
 	end,
 
 	SetXLabel = function(self, Label)
@@ -532,10 +584,18 @@ local PlotController = {
 	end,
 
 	Draw = function(self, Width, Height)
+		-- Inset the actual plots 10 pixels
 		local Mat = Matrix()
 		Mat:Translate(Vector(10, 10))
-		
+
 		cam.PushModelMatrix(Mat)
+			-- Draw ranges
+			for _, Range in pairs(self.DrawnRanges) do
+				DrawAxisRange(Width - 20, Height - 20, Range.Axis, Range.Range, Range.CrossOffset,
+							  Range.Base, Range.Step, Range.ShowValues)
+			end
+
+			-- Draw all plots
 			for _, Plot in pairs(self.Plots) do
 				if Plot.PlotType == "2d-line" then
 					Draw2DLinePlot(Width - 20, Height - 20, Plot.Series[1], Plot.Series[2], Plot.Args)
@@ -550,12 +610,12 @@ local PlotController = {
 		
 		-- Draw X label
 		if isstring(self.XLabel) and #self.XLabel > 0 then
-			draw.DrawText(self.XLabel, "ACF_Label", Width - 3, Height - 15, Color(0, 0, 0), TEXT_ALIGN_RIGHT)
+			draw.DrawText(self.XLabel, "ACF_PlotLabel", Width - 3, Height - 15, Color(0, 0, 0), TEXT_ALIGN_RIGHT)
 		end
 
 		-- Draw Y label
 		if isstring(self.YLabel) and #self.YLabel > 0 then
-			draw.DrawText(self.YLabel, "ACF_Label", 4, 0, Color(0, 0, 0), TEXT_ALIGN_LEFT)
+			draw.DrawText(self.YLabel, "ACF_PlotLabel", 4, 0, Color(0, 0, 0), TEXT_ALIGN_LEFT)
 		end
 	end,
 }
@@ -567,6 +627,7 @@ PlotController.Create = function()
 		YLabel = "",
 		DrawXAxis = false,
 		DrawYAxis = false,
+		DrawnRanges = {}
 	}, PlotController)
 end
 
