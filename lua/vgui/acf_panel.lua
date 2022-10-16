@@ -485,12 +485,7 @@ function PANEL:AddPlot()
 		surface.SetDrawColor(self.Settings.Background)
 		self:DrawFilledRect()
 		
-		local Mat = Matrix()
-		Mat:Translate(Vector(5, 5))
-
-		cam.PushModelMatrix(Mat)
-			self.PlotController:Draw(Width - 10, Height - 10)
-		cam.PopModelMatrix()
+		self.PlotController:Draw(Width, Height)
 	end
 
 	-- Extra panel to act as bottom margin, since apparently I can't use DockMargin

@@ -285,6 +285,34 @@ DataFrame.__index = DataFrame
 
 Plot.DataFrame = DataFrame
 
+-- AxisRange is a shared min/max type, multiple plots that use the same range will be scaled
+-- equally when drawn.
+local AxisRange = {
+	Update = function(self, Value)
+		if Value < self.Min then self.Min = Value end
+		if Value > self.Max then self.Max = Value end
+	end,
+
+	GetMin = function(self)
+		return self.Min
+	end,
+
+	GetMax = function(self)
+		return self.Max
+	end,
+}
+
+AxisRange.Create = function(Min, Max)
+	return setmetatable({
+		Min = Min or math.huge,
+		Max = Max or -math.huge,
+	}, AxisRange)
+end
+
+AxisRange.__index = AxisRange
+
+Plot.AxisRange = AxisRange
+
 -- Data view is an immutable (not really, since this is lua after all) view into a column in a data
 -- frame. It starts and ends at specified indices and provides caching. Can be used for plotting
 -- values or for example getting data out of a computed column in a certain range easily.
@@ -303,19 +331,16 @@ local DataView = {
 		self.DataCache = {}
 		self.VarCache = {}
 
-		local Min = math.huge
-		local Max = -math.huge
+		local AxisRange = AxisRange.Create()
 
 		for I = self.Start, self.End do
 			local Val = self.Df:EvaluateCellAt(self.ColumnName, I)
-			self.DataCache[I - self.Start + 1] = Val
 
-			if Val < Min then Min = Val end
-			if Val > Max then Max = Val end
+			self.DataCache[I - self.Start + 1] = Val
+			AxisRange:Update(Val)
 		end
 
-		self.VarCache.Min = Min
-		self.VarCache.Max = Max
+		self.VarCache.AxisRange = AxisRange
 	end,
 
 	GetLength = function(self)
@@ -324,12 +349,17 @@ local DataView = {
 
 	GetMax = function(self)
 		if self.VarCache == nil then self:Update() end
-		return self.VarCache.Max
+		return self.VarCache.AxisRange:GetMax()
 	end,
 
 	GetMin = function(self)
 		if self.VarCache == nil then self:Update() end
-		return self.VarCache.Min
+		return self.VarCache.AxisRange:GetMin()
+	end,
+
+	GetAxisRange = function(self)
+		if self.VarCache == nil then self:Update() end
+		return self.VarCache.AxisRange
 	end,
 
 	-- Gets a value from the view, indexed from the start of the view
@@ -381,29 +411,37 @@ local RequiredPlotArgs = {
 	["2d-line"] = {
 		SeriesX = "table",       -- DataView for X data
 		SeriesY = "table",       -- DataView for Y data
-		--SeriesXMin = "number", -- Default: min(SeriesX)
-		--SeriesXMax = "number", -- Default: max(SeriesX)
-		--SeriesYMin = "number", -- Default: min(SeriesY)
-		--SeriesYMin = "number", -- Default: max(SeriesY)
-		--Line = "number",       -- Default: 1, thiccness of line
-		--Dots = "number",       -- Default: 0, size of data point dots
 	}
 }
 
 local function Draw2DLinePlot(Width, Height, SeriesX, SeriesY, Args)
 	surface.SetDrawColor(Args.Color)
 
+	local AxisRange, AxisRange
+
+	if Args.SharedRangeX then
+		AxisRangeX = Args.SharedRangeX
+	else
+		AxisRangeX = SeriesX:GetAxisRange()
+	end
+
+	if Args.SharedRangeY then
+		AxisRangeY = Args.SharedRangeY
+	else
+		AxisRangeY = SeriesY:GetAxisRange()
+	end
+
 	local I = 1
 	local Len = math.min(SeriesX:GetLength(), SeriesY:GetLength())
 
-	local LastX = math.Remap(SeriesX:GetValue(I), Args.SeriesXMin, Args.SeriesXMax, 0, Width)
-	local LastY = math.Remap(SeriesY:GetValue(I), Args.SeriesYMin, Args.SeriesYMax, Height, 0)
+	local LastX = math.Remap(SeriesX:GetValue(I), AxisRangeX:GetMin(), AxisRangeX:GetMax(), 0, Width)
+	local LastY = math.Remap(SeriesY:GetValue(I), AxisRangeY:GetMin(), AxisRangeY:GetMax(), Height, 0)
 
 	I = I + 1
 
 	while I <= Len do
-		local X = math.Remap(SeriesX:GetValue(I), Args.SeriesXMin, Args.SeriesXMax, 0, Width)
-		local Y = math.Remap(SeriesY:GetValue(I), Args.SeriesYMin, Args.SeriesYMax, Height, 0)
+		local X = math.Remap(SeriesX:GetValue(I), AxisRangeX:GetMin(), AxisRangeX:GetMax(), 0, Width)
+		local Y = math.Remap(SeriesY:GetValue(I), AxisRangeY:GetMin(), AxisRangeY:GetMax(), Height, 0)
 
 		if isnumber(Args.Line) and Args.Line > 0 then
 			surface.DrawLine(LastX, LastY, X, Y)
@@ -427,38 +465,24 @@ local PlotController = {
 		local RequiredArgs = RequiredPlotArgs[Type]
 		if RequiredArgs then
 			for Arg, ArgType in pairs(RequiredArgs) do
-				print(Arg, ArgType, Args[Arg], type(Args[Arg]))
 				if Args[Arg] == nil then return end
 				if type(Args[Arg]) ~= ArgType then return end
 			end
 		end
 
-		-- Set up default vars, and series table
-		-- This should really be done in a better way later
-
 		local Series = {}
-
-		if Args.Color == nil or type(Args.Color) ~= "table" then
-			Args.Color = Color(255, 0, 0)
-		end
 
 		if Type == "2d-line" then
 			Series = { Args.SeriesX, Args.SeriesY }
 
-			if Args.SeriesXMin == nil or type(Args.SeriesXMin) ~= "number" then
-				Args.SeriesXMin = Args.SeriesX:GetMin()
+			if Args.SharedRangeX then
+				Args.SharedRangeX:Update(Args.SeriesX:GetMin())
+				Args.SharedRangeX:Update(Args.SeriesX:GetMax())
 			end
 
-			if Args.SeriesXMax == nil or type(Args.SeriesXMax) ~= "number" then
-				Args.SeriesXMax = Args.SeriesX:GetMax()
-			end
-
-			if Args.SeriesYMin == nil or type(Args.SeriesYMin) ~= "number" then
-				Args.SeriesYMin = Args.SeriesY:GetMin()
-			end
-
-			if Args.SeriesYMax == nil or type(Args.SeriesYMax) ~= "number" then
-				Args.SeriesYMax = Args.SeriesY:GetMax()
+			if Args.SharedRangeY then
+				Args.SharedRangeY:Update(Args.SeriesY:GetMin())
+				Args.SharedRangeY:Update(Args.SeriesY:GetMax())
 			end
 		end
 
@@ -489,55 +513,49 @@ local PlotController = {
 		end
 	end,
 
-	GetUnifiedXMinMax = function(self)
-		local Min = math.huge
-		local Max = -math.huge
-
-		for I = 1, #self.Plots do
-			local PMin, PMax = self:GetPlotXMinMax(I)
-			if PMin < Min then Min = PMin end
-			if PMax > Max then Max = PMax end
-		end
-
-		return Min, Max
-	end,
-
-	GetUnifiedYMinMax = function(self)
-		local Min = math.huge
-		local Max = -math.huge
-
-		for I = 1, #self.Plots do
-			local PMin, PMax = self:GetPlotYMinMax(I)
-			if PMin < Min then Min = PMin end
-			if PMax > Max then Max = PMax end
-		end
-
-		return Min, Max
-	end,
-
-	SetXLabel = function(Label)
+	SetXLabel = function(self, Label)
 		if not isstring(Label) then return end
 		self.XLabel = Label
 	end,
 
-	SetYLabel = function(Label)
+	SetYLabel = function(self, Label)
 		if not isstring(Label) then return end
 		self.YLabel = Label
 	end,
 
+	SetDrawXAxis = function(self, Draw)
+		self.DrawXAxis = Draw
+	end,
+
+	SetDrawYAxis = function(self, Draw)
+		self.DrawYAxis = Draw
+	end,
+
 	Draw = function(self, Width, Height)
-		for _, Plot in pairs(self.Plots) do
-			if Plot.PlotType == "2d-line" then
-				Draw2DLinePlot(Width, Height, Plot.Series[1], Plot.Series[2], Plot.Args)
+		local Mat = Matrix()
+		Mat:Translate(Vector(10, 10))
+		
+		cam.PushModelMatrix(Mat)
+			for _, Plot in pairs(self.Plots) do
+				if Plot.PlotType == "2d-line" then
+					Draw2DLinePlot(Width - 20, Height - 20, Plot.Series[1], Plot.Series[2], Plot.Args)
+				end
 			end
-		end
+		cam.PopModelMatrix()
 
+		-- Draw X/Y axes
+		surface.SetDrawColor(Color(0, 0, 0))
+		if self.DrawXAxis then surface.DrawLine(1, 1, 1, Height - 3) end
+		if self.DrawYAxis then surface.DrawLine(4, Height - 1, Width - 1, Height - 1) end
+		
+		-- Draw X label
 		if isstring(self.XLabel) and #self.XLabel > 0 then
-
+			draw.DrawText(self.XLabel, "ACF_Label", Width - 3, Height - 15, Color(0, 0, 0), TEXT_ALIGN_RIGHT)
 		end
 
+		-- Draw Y label
 		if isstring(self.YLabel) and #self.YLabel > 0 then
-
+			draw.DrawText(self.YLabel, "ACF_Label", 4, 0, Color(0, 0, 0), TEXT_ALIGN_LEFT)
 		end
 	end,
 }
@@ -547,6 +565,8 @@ PlotController.Create = function()
 		Plots = {},
 		XLabel = "",
 		YLabel = "",
+		DrawXAxis = false,
+		DrawYAxis = false,
 	}, PlotController)
 end
 

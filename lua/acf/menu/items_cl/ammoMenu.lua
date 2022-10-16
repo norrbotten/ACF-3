@@ -234,16 +234,46 @@ function ACF.UpdateAmmoMenu(Menu, Settings)
 				end
 			)
 
+			Df:AddComputedColumn("f2(x)",
+				nil,
+				function(Df, X)
+					return -Df:EvaluateCellAt("f(x)", X)
+				end
+			)
+
 			local DvX = ACF.Plot.DataView.Create(Df, "x", 1, 180)
-			local DvY = ACF.Plot.DataView.Create(Df, "f(x)", 1, 180)
+			
+			local DvY  = ACF.Plot.DataView.Create(Df, "f(x)", 1, 180)
+			local DvY2 = ACF.Plot.DataView.Create(Df, "f2(x)", 1, 180)
+
+			local SharedRangeX = ACF.Plot.AxisRange.Create()
+			local SharedRangeY = ACF.Plot.AxisRange.Create()
 
 			PlotController:AddPlot("2d-line", {
 				SeriesX = DvX,
 				SeriesY = DvY,
-				Line = 0,
-				Dots = 2,
+				SharedRangeX = SharedRangeX,
+				SharedRangeY = SharedRangeY,
+				Line = 1,
+				Dots = 0,
 				Color = Color(0, 0, 255),
 			})
+
+			PlotController:AddPlot("2d-line", {
+				SeriesX = DvX,
+				SeriesY = DvY2,
+				SharedRangeX = SharedRangeX,
+				SharedRangeY = SharedRangeY,
+				Line = 1,
+				Dots = 0,
+				Color = Color(255, 0, 0),
+			})
+
+			PlotController:SetXLabel("x")
+			PlotController:SetDrawXAxis(true)
+
+			PlotController:SetYLabel("y")
+			PlotController:SetDrawYAxis(true)
 		end
 	end
 
